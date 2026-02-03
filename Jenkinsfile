@@ -2,17 +2,18 @@ pipeline {
     agent any
 
     tools {
-        maven 'maven9'  // Ensure Maven tool is configured in Jenkins
+        maven 'maven9'
     }
 
     environment {
-        AWS_REGION     = 'eu-north-1'
-        CLUSTER_NAME   = 'my-eks-cluster'
+        AWS_REGION = 'eu-north-1'
+        CLUSTER_NAME = 'my-eks-cluster'
+
         AWS_ACCOUNT_ID = '162343471712'
-        ECR_REPO       = 'my-app'
-        IMAGE_TAG      = "${BUILD_NUMBER}"
-        ECR_URI        = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
-        PATH           = "/usr/local/bin:${env.PATH}" // Ensures Jenkins finds aws CLI
+        ECR_REPO = 'my-app'
+
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        ECR_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
     }
 
     stages {
@@ -24,9 +25,9 @@ pipeline {
                     credentialsId: 'aws-creds'
                 ]]) {
                     sh '''
-                        echo "Testing AWS CLI with credentials..."
-                        aws --version
-                        aws sts get-caller-identity
+                    echo "Testing AWS CLI with credentials..."
+                    aws --version
+                    aws sts get-caller-identity
                     '''
                 }
             }
@@ -41,8 +42,8 @@ pipeline {
         stage('2. Maven Build') {
             steps {
                 sh '''
-                    echo "Running Maven build..."
-                    mvn clean package -DskipTests
+                echo "Running Maven build..."
+                mvn clean package -DskipTests
                 '''
             }
         }
@@ -50,62 +51,78 @@ pipeline {
         stage('3. Build Docker Image') {
             steps {
                 sh '''
-                    echo "Building Docker image..."
-                    docker build -t ${ECR_URI}:${IMAGE_TAG} .
+                echo "Building Docker image..."
+                docker build -t ${ECR_URI}:${IMAGE_TAG} .
                 '''
             }
         }
 
-        stage('4. Login to ECR') {
+        stage('4. Ensure ECR Repository') {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: 'aws-creds'
                 ]]) {
                     sh '''
-                        echo "Logging in to ECR..."
-                        aws ecr get-login-password --region ${AWS_REGION} \
+                    echo "Checking if ECR repository exists..."
+                    if ! aws ecr describe-repositories --repository-names ${ECR_REPO} --region ${AWS_REGION} > /dev/null 2>&1; then
+                        echo "Repository does not exist. Creating..."
+                        aws ecr create-repository --repository-name ${ECR_REPO} --region ${AWS_REGION}
+                    else
+                        echo "Repository already exists."
+                    fi
+                    '''
+                }
+            }
+        }
+
+        stage('5. Login to ECR') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
+                    sh '''
+                    echo "Logging in to ECR..."
+                    aws ecr get-login-password --region ${AWS_REGION} \
                         | docker login --username AWS --password-stdin ${ECR_URI}
                     '''
                 }
             }
         }
 
-        stage('5. Push Docker Image to ECR') {
+        stage('6. Push Docker Image to ECR') {
             steps {
                 sh '''
-                    echo "Pushing Docker image to ECR..."
-                    docker push ${ECR_URI}:${IMAGE_TAG}
+                echo "Pushing Docker image to ECR..."
+                docker push ${ECR_URI}:${IMAGE_TAG}
                 '''
             }
         }
 
-        stage('6. Connect to EKS') {
+        stage('7. Connect to EKS') {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: 'aws-creds'
                 ]]) {
                     sh '''
-                        echo "Updating kubeconfig for EKS..."
-                        aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
+                    echo "Updating kubeconfig for EKS..."
+                    aws eks update-kubeconfig \
+                        --region ${AWS_REGION} \
+                        --name ${CLUSTER_NAME}
                     '''
                 }
             }
         }
 
-        stage('7. Deploy to EKS') {
+        stage('8. Deploy to EKS') {
             steps {
                 sh '''
-                    echo "Deploying to EKS..."
-                    # Update deployment image if it exists, else apply YAML
-                    if kubectl get deployment my-app; then
-                        kubectl set image deployment/my-app my-app=${ECR_URI}:${IMAGE_TAG} --record
-                    else
-                        kubectl apply -f k8s/deployment.yaml
-                    fi
-
-                    kubectl rollout status deployment/my-app
+                echo "Deploying to EKS..."
+                kubectl set image deployment/my-app \
+                    my-app=${ECR_URI}:${IMAGE_TAG}
+                kubectl rollout status deployment/my-app
                 '''
             }
         }
