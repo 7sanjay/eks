@@ -19,11 +19,16 @@ pipeline {
 
         stage('0. Test AWS CLI') {
             steps {
-                sh '''
-                    echo "Testing AWS CLI..."
-                    aws --version
-                    aws sts get-caller-identity
-                '''
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
+                    sh '''
+                        echo "Testing AWS CLI with credentials..."
+                        aws --version
+                        aws sts get-caller-identity
+                    '''
+                }
             }
         }
 
@@ -77,10 +82,15 @@ pipeline {
 
         stage('6. Connect to EKS') {
             steps {
-                sh '''
-                    echo "Updating kubeconfig for EKS..."
-                    aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
-                '''
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
+                    sh '''
+                        echo "Updating kubeconfig for EKS..."
+                        aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
+                    '''
+                }
             }
         }
 
