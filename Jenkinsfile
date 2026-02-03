@@ -2,17 +2,17 @@ pipeline {
     agent any
 
     tools {
-        maven 'maven9'
+        maven 'maven9'  // Ensure Maven tool is configured in Jenkins
     }
 
     environment {
-        AWS_REGION    = 'eu-north-1'
-        CLUSTER_NAME  = 'my-eks-cluster'
+        AWS_REGION     = 'eu-north-1'
+        CLUSTER_NAME   = 'my-eks-cluster'
         AWS_ACCOUNT_ID = '162343471712'
         ECR_REPO       = 'my-app'
         IMAGE_TAG      = "${BUILD_NUMBER}"
         ECR_URI        = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
-        PATH           = "/usr/local/bin:${env.PATH}" // ensure Jenkins can find aws CLI
+        PATH           = "/usr/local/bin:${env.PATH}" // Ensures Jenkins finds aws CLI
     }
 
     stages {
@@ -35,7 +35,10 @@ pipeline {
 
         stage('2. Maven Build') {
             steps {
-                sh 'mvn clean package -DskipTests'
+                sh '''
+                    echo "Running Maven build..."
+                    mvn clean package -DskipTests
+                '''
             }
         }
 
@@ -63,4 +66,47 @@ pipeline {
             }
         }
 
-        stage('5. Push Docker Image to ECR
+        stage('5. Push Docker Image to ECR') {
+            steps {
+                sh '''
+                    echo "Pushing Docker image to ECR..."
+                    docker push ${ECR_URI}:${IMAGE_TAG}
+                '''
+            }
+        }
+
+        stage('6. Connect to EKS') {
+            steps {
+                sh '''
+                    echo "Updating kubeconfig for EKS..."
+                    aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
+                '''
+            }
+        }
+
+        stage('7. Deploy to EKS') {
+            steps {
+                sh '''
+                    echo "Deploying to EKS..."
+                    # Update deployment image if it exists, else apply YAML
+                    if kubectl get deployment my-app; then
+                        kubectl set image deployment/my-app my-app=${ECR_URI}:${IMAGE_TAG} --record
+                    else
+                        kubectl apply -f k8s/deployment.yaml
+                    fi
+
+                    kubectl rollout status deployment/my-app
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '🎉 Deployment Successful!'
+        }
+        failure {
+            echo '❌ Deployment Failed'
+        }
+    }
+}
