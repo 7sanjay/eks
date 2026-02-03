@@ -9,7 +9,7 @@ pipeline {
         AWS_REGION = 'eu-north-1'
         CLUSTER_NAME = 'my-eks-cluster'
 
-        AWS_ACCOUNT_ID = '123456789012'
+        AWS_ACCOUNT_ID = '162343471712'
         ECR_REPO = 'my-app'
 
         IMAGE_TAG = "${BUILD_NUMBER}"
